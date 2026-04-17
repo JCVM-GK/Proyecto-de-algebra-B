@@ -7,8 +7,7 @@ Migrado desde C++/SFML
 import math
 import sys
 import os
-
-import pygame
+import pygame #type: ignore
 
 # ============================================
 # CONSTANTES
@@ -28,6 +27,9 @@ COLOR_VECTOR = (0, 200, 255)
 COLOR_PUNTO = (255, 100, 34)  # Naranja #ff6422
 COLOR_TEXTO = (255, 255, 255)
 COLOR_GRID = (60, 60, 60)
+COLOR_PANEL = (45, 45, 45)
+COLOR_BOTON = (80, 80, 80)
+COLOR_BOTON_HOVER = (110, 110, 110)
 
 
 # ============================================
@@ -211,6 +213,24 @@ class VisualizadorPygame:
         self.font_small = self._cargar_fuente(12)
 
         self.escala = 1.0
+        self.controles_ui = self._crear_controles_ui()
+
+    def _crear_controles_ui(self) -> dict[str, pygame.Rect]:
+        """Crea botones del panel gráfico para cambiar variables."""
+        panel_x = WIDTH - 190
+        base_y = 90
+        gap = 45
+        w, h = 32, 26
+        return {
+            "freq_minus": pygame.Rect(panel_x + 65, base_y + gap * 0, w, h),
+            "freq_plus": pygame.Rect(panel_x + 105, base_y + gap * 0, w, h),
+            "r_minus": pygame.Rect(panel_x + 65, base_y + gap * 1, w, h),
+            "r_plus": pygame.Rect(panel_x + 105, base_y + gap * 1, w, h),
+            "l_minus": pygame.Rect(panel_x + 65, base_y + gap * 2, w, h),
+            "l_plus": pygame.Rect(panel_x + 105, base_y + gap * 2, w, h),
+            "c_minus": pygame.Rect(panel_x + 65, base_y + gap * 3, w, h),
+            "c_plus": pygame.Rect(panel_x + 105, base_y + gap * 3, w, h),
+        }
 
     def _cargar_fuente(self, tamano: int) -> pygame.font.Font:
         """Intenta cargar una fuente del sistema, o usa la fuente por defecto de pygame."""
@@ -342,17 +362,46 @@ class VisualizadorPygame:
     def dibujar_instrucciones(self):
         """Dibuja las instrucciones de control."""
         lineas = [
-            "Controles:",
-            "  UP/DOWN   : +/- 1 Hz",
-            "  LEFT/RIGHT: +/- 10 Hz",
-            "  ESC       : Salir"
+            "Controles de Simulacion:",
+            "  Flechas IZQ/DER: +/- Frecuencia",
+            "  Teclas R / E   : +/- Resistencia (R)",
+            "  Teclas L / K   : +/- Inductancia (L)",
+            "  Teclas C / X   : +/- Capacitancia (C)",
+            "  Clic en panel  : botones +/- GUI",
+            "  ESC: Salir"
         ]
 
-        y_offset = HEIGHT - 100
+        y_offset = HEIGHT - 160
         for linea in lineas:
             texto = self.font_instrucciones.render(linea, True, (200, 200, 200))
-            self.screen.blit(texto, (WIDTH - 200, y_offset))
-            y_offset += 18
+            self.screen.blit(texto, (WIDTH - 250, y_offset))
+            y_offset += 20
+
+    def dibujar_panel_controles(self):
+        """Dibuja panel gráfico con botones +/- para F, R, L, C."""
+        panel_rect = pygame.Rect(WIDTH - 200, 60, 170, 220)
+        pygame.draw.rect(self.screen, COLOR_PANEL, panel_rect, border_radius=8)
+        pygame.draw.rect(self.screen, COLOR_EJES, panel_rect, width=1, border_radius=8)
+
+        titulo = self.font_instrucciones.render("Controles GUI", True, COLOR_TEXTO)
+        self.screen.blit(titulo, (panel_rect.x + 12, panel_rect.y + 8))
+
+        labels = [("F", 0), ("R", 1), ("L", 2), ("C", 3)]
+        mouse_pos = pygame.mouse.get_pos()
+        for letra, idx in labels:
+            y = 90 + idx * 45
+            label = self.font_instrucciones.render(letra, True, COLOR_TEXTO)
+            self.screen.blit(label, (panel_rect.x + 16, y + 4))
+
+            minus_key = f"{letra.lower()}_minus" if letra != "F" else "freq_minus"
+            plus_key = f"{letra.lower()}_plus" if letra != "F" else "freq_plus"
+            for key, txt in ((minus_key, "-"), (plus_key, "+")):
+                rect = self.controles_ui[key]
+                color = COLOR_BOTON_HOVER if rect.collidepoint(mouse_pos) else COLOR_BOTON
+                pygame.draw.rect(self.screen, color, rect, border_radius=5)
+                pygame.draw.rect(self.screen, COLOR_EJES, rect, width=1, border_radius=5)
+                t = self.font_info.render(txt, True, COLOR_TEXTO)
+                self.screen.blit(t, (rect.x + 10, rect.y - 1))
 
     def render(self, frecuencia: float, z: Complejo, r: float, l: float, c: float):
         """Renderiza un frame completo."""
@@ -368,36 +417,41 @@ class VisualizadorPygame:
 
         # Dibujar textos
         self.dibujar_texto_info(frecuencia, z, r, l, c)
+        self.dibujar_panel_controles()
         self.dibujar_instrucciones()
 
         pygame.display.flip()
 
-    def handle_events(self) -> tuple[bool, float]:
+    def handle_events(self) -> tuple[bool, float, float, float, float]:
         """
-        Maneja los eventos de pygame.
-
-        Returns:
-            Tupla (continuar_ejecutando, delta_frecuencia)
+        Retorna: (continuar, d_frecuencia, d_R, d_L, d_C)
         """
-        delta_frecuencia = 0.0
+        d_freq, d_r, d_l, d_c = 0.0, 0.0, 0.0, 0.0
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                return False, delta_frecuencia
+                return False, 0.0, 0.0, 0.0, 0.0
 
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
-                    return False, delta_frecuencia
-                elif event.key == pygame.K_UP:
-                    delta_frecuencia = 1.0
-                elif event.key == pygame.K_DOWN:
-                    delta_frecuencia = -1.0
-                elif event.key == pygame.K_RIGHT:
-                    delta_frecuencia = 10.0
-                elif event.key == pygame.K_LEFT:
-                    delta_frecuencia = -10.0
+                    return False, 0.0, 0.0, 0.0, 0.0
+                
+                # Controles de Frecuencia (Flechas)
+                elif event.key == pygame.K_RIGHT: d_freq = 10.0
+                elif event.key == pygame.K_LEFT: d_freq = -10.0
 
-        return True, delta_frecuencia
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                pos = event.pos
+                if self.controles_ui["freq_plus"].collidepoint(pos): d_freq += 10.0
+                elif self.controles_ui["freq_minus"].collidepoint(pos): d_freq -= 10.0
+                elif self.controles_ui["r_plus"].collidepoint(pos): d_r += 1.0
+                elif self.controles_ui["r_minus"].collidepoint(pos): d_r -= 1.0
+                elif self.controles_ui["l_plus"].collidepoint(pos): d_l += 0.001
+                elif self.controles_ui["l_minus"].collidepoint(pos): d_l -= 0.001
+                elif self.controles_ui["c_plus"].collidepoint(pos): d_c += 0.00001
+                elif self.controles_ui["c_minus"].collidepoint(pos): d_c -= 0.00001
+
+        return True, d_freq, d_r, d_l, d_c
 
     def tick(self, fps: int = 60):
         """Limita el framerate."""
@@ -601,45 +655,53 @@ def main():
     print("Presione ESC para salir\n")
 
     # Usar valores de línea de comandos o pedir por consola
-    if sys.stdin.isatty():  # Si hay terminal interactiva
-        r = pedir_valor_consola("R (ohms)", args.r)
-        l = pedir_valor_consola("L (henrios)", args.l)
-        c = pedir_valor_consola("C (farads)", args.c)
-        frecuencia = pedir_valor_consola("Frecuencia inicial (Hz)", args.freq)
-    else:
-        r, l, c, frecuencia = args.r, args.l, args.c, args.freq
-
-    # Crear circuito
-    circuito = Circuito()
-    circuito.agregar_componente(Componente('R', r))
-    circuito.agregar_componente(Componente('L', l))
-    circuito.agregar_componente(Componente('C', c))
+# Usar valores de línea de comandos o pedir por consola
+    # Cambiamos la verificación para evitar el error si sys.stdin es None
+    r, l, c, frecuencia = args.r, args.l, args.c, args.freq
 
     # Crear visualizador
     visualizador = VisualizadorPygame()
+    circuito = Circuito()
 
     # Bucle principal
     ejecutando = True
     while ejecutando:
-        # Manejar eventos
-        continuar, delta_freq = visualizador.handle_events()
+        # Manejo de eventos independiente de la terminal
+        continuar, delta_f, delta_r, delta_l, delta_c = visualizador.handle_events()
         if not continuar:
-            ejecutando = False
             break
 
-        # Actualizar frecuencia
-        frecuencia = max(1.0, frecuencia + delta_freq)
+        # Captura de teclas para R, L, C
+        keys = pygame.key.get_pressed()
+        if keys[pygame.K_r]:
+            r += 1.0
+        if keys[pygame.K_e]:
+            r = max(0.1, r - 1.0)
+        if keys[pygame.K_l]:
+            l += 0.001
+        if keys[pygame.K_k]:
+            l = max(0.001, l - 0.001)
+        if keys[pygame.K_c]:
+            c += 0.00001
+        if keys[pygame.K_x]:
+            c = max(0.00001, c - 0.00001)
 
-        # Calcular impedancia
+        frecuencia = max(1.0, frecuencia + delta_f)
+        r = max(0.1, r + delta_r)
+        l = max(0.001, l + delta_l)
+        c = max(0.00001, c + delta_c)
+
+        # Re-crear o actualizar componentes del circuito
+        circuito = Circuito()
+        circuito.agregar_componente(Componente('R', r))
+        circuito.agregar_componente(Componente('L', l))
+        circuito.agregar_componente(Componente('C', c))
+
         z_total = circuito.impedancia_total(frecuencia)
-
-        # Renderizar
         visualizador.render(frecuencia, z_total, r, l, c)
         visualizador.tick(60)
 
     pygame.quit()
-    print("\n¡Gracias por usar el simulador!")
-
 
 if __name__ == "__main__":
     main()
